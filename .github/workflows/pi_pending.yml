@@ -1,0 +1,60 @@
+name: OA Data Fetch
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_choice:
+        description: 'Select script to run'
+        required: true
+        default: 'ALL'
+        type: choice
+        options:
+          - ALL
+          # - OA_data_fetch_odoo.py
+          - pending_pi_fetch_data.py
+          - pi_issue_bank_wise.py
+  schedule:
+    - cron: "35 22 * * *"  # Daily at 4:35 AM Bangladesh time (UTC+6)
+
+jobs:
+  fetch-oa-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run selected OA script(s)
+        env:
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
+          ODOO_PASSWORD: ${{ secrets.ODOO_PASSWORD }}
+          GOOGLE_CREDENTIALS_BASE64: ${{ secrets.GOOGLE_CREDENTIALS_BASE64 }}
+        run: |
+          # Fallback to ALL if no input provided (like in scheduled runs)
+          SCRIPT_CHOICE="${{ github.event.inputs.script_choice }}"
+          if [ -z "$SCRIPT_CHOICE" ]; then
+            SCRIPT_CHOICE="ALL"
+          fi
+          echo "Selected script: $SCRIPT_CHOICE"
+
+
+          if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "pending_pi_fetch_data.py" ]]; then
+            echo "Running pending_pi_fetch_data.py..."
+            python pending_pi_fetch_data.py
+          fi
+
+          if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "pi_issue_bank_wise.py" ]]; then
+            echo "Running pi_issue_bank_wise.py..."
+            python pi_issue_bank_wise.py
+          fi
+
+          
