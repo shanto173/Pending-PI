@@ -73,11 +73,12 @@ def fetch_regular_sale_data(uid, company_id, batch_size=1000):
                 },
                 "order_partner_id": {"fields": {"display_name": {}}},
                 "create_date": {},
-                "order_id": {"fields": {"display_name": {}}},
+                "order_id": {"fields": {"display_name": {}, "buyer_name": {"fields": {"display_name": {}, "brand": {"fields": {"display_name": {}}}}}, "brand_group": {}}},
                 "price_total": {},
                 "price_subtotal": {},
                 "product_uom_qty": {},
-                "qty_to_invoice": {}
+                "qty_to_invoice": {},
+                "slidercodesfg": {}
             }
         }
     }
@@ -127,6 +128,30 @@ def safe_get(obj, key, default=''):
         return obj.get(key, default)
     return default
 
+# --------- Helper to safely get string values ---------
+def get_string_value(field, subfield=None):
+    """
+    Safely extract a string from Odoo API fields.
+    Handles:
+      - dict with display_name or nested fields
+      - int (ID)
+      - str
+      - False/None
+    """
+    if isinstance(field, dict):
+        if subfield:
+            value = field.get(subfield)
+            return get_string_value(value)
+        if "display_name" in field:
+            return str(field["display_name"] or "")
+        # fallback: join all dict values as string
+        return " ".join([str(v) for v in field.values()])
+    elif isinstance(field, int):
+        return str(field)
+    elif field in (False, None):
+        return ""
+    return str(field)
+
 # --------- Flatten Regular Sale Record ---------
 def flatten_regular_sale_record(rec):
     """Flatten sale order with order lines into multiple rows (one per order line)"""
@@ -148,7 +173,10 @@ def flatten_regular_sale_record(rec):
             "Total": "",
             "Subtotal": "",
             "Quantity": "",
-            "Quantity To Invoice": ""
+            "Quantity To Invoice": "",
+            "Buyer": "",
+            "Brand Group": "",
+            "Slider Code (SFG)": ""
         }]
     
     # Create a row for each order line
@@ -164,7 +192,10 @@ def flatten_regular_sale_record(rec):
             "Total": line.get("price_total", ""),
             "Subtotal": line.get("price_subtotal", ""),
             "Quantity": line.get("product_uom_qty", ""),
-            "Quantity To Invoice": line.get("qty_to_invoice", "")
+            "Quantity To Invoice": line.get("qty_to_invoice", ""),
+            "Buyer": get_string_value(line.get("order_id", {}).get("buyer_name")),
+            "Brand Group": get_string_value(line.get("order_id", {}).get("buyer_name"), "brand"),
+            "Slider Code (SFG)": line.get("slidercodesfg") or ""
         })
     
     return flattened_rows
@@ -189,8 +220,8 @@ def paste_to_gsheet(df, sheet_name):
             n //= 26
         return result
     
-    # Group by Date, FG Category, Customer and aggregate
-    grouped_df = df.groupby(['Date', 'FG Category', 'Customer']).agg({
+    # Group by Date, FG Category, Customer, Buyer, Brand Group, Slider Code (SFG) and aggregate
+    grouped_df = df.groupby(['Date', 'FG Category', 'Customer', 'Buyer', 'Brand Group', 'Slider Code (SFG)']).agg({
         'Total': 'sum',
         'Subtotal': 'sum',
         'Quantity': 'sum',
@@ -252,7 +283,7 @@ if __name__ == "__main__":
     uid = odoo_login()
     
     # Regular Sale data - Company ID mapping to Sheet Tab names
-    regular_sale_map = [(1, "Pending_Pi_Zipper"), (3, "Pending_Pi_MT")]
+    regular_sale_map = [(1, "pend_pi_zip"), (3, "pend_pi_mt")]
 
     # Fetch Regular Sale data
     print("\n========== Fetching Regular Sale Data ==========")
