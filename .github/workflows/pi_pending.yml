@@ -13,6 +13,9 @@ on:
           # - OA_data_fetch_odoo.py
           - pending_pi_fetch_data.py
           - pi_issue_bank_wise.py
+          - carter's_pending.py
+          - carter's_journey_oa_bo_sa_pi.py
+          - fg_delivery_carters.py
   schedule:
     - cron: "35 22 * * *"  # Daily at 4:35 AM Bangladesh time (UTC+6)
 
@@ -55,6 +58,21 @@ jobs:
           if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "pi_issue_bank_wise.py" ]]; then
             echo "Running pi_issue_bank_wise.py..."
             python pi_issue_bank_wise.py
+          fi
+
+          if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "carter's_pending.py" ]]; then
+            echo "Running carter's_pending.py..."
+            python "carter's_pending.py"
+          fi
+
+          if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "carter's_journey_oa_bo_sa_pi.py" ]]; then
+            echo "Running carter's_journey_oa_bo_sa_pi.py..."
+            python "carter's_journey_oa_bo_sa_pi.py"
+          fi
+
+          if [[ "$SCRIPT_CHOICE" == "ALL" || "$SCRIPT_CHOICE" == "fg_delivery_carters.py" ]]; then
+            echo "Running fg_delivery_carters.py..."
+            python "fg_delivery_carters.py"
           fi
 
           
