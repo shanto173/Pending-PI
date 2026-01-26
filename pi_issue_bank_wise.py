@@ -145,9 +145,9 @@ def paste_to_gsheet(df, sheet_name):
     
     print(f"📊 Grouped {len(df)} records into {len(grouped_df)} summary rows")
     
-    # Clear all existing data in the sheet
-    worksheet.clear()
-    print(f"🗑️ Cleared existing data from sheet: {sheet_name}")
+    # Clear only range A:C instead of entire sheet
+    worksheet.batch_clear(["A:C"])
+    print(f"🗑️ Cleared range A:C from sheet: {sheet_name}")
     
     # Write header
     header = grouped_df.columns.tolist()
