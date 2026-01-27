@@ -173,9 +173,28 @@ def flatten_manufacturing_order_record(rec):
 
 # --------- Upload to Google Sheet ---------
 def paste_to_gsheet(df, sheet_name):
-    worksheet = gc.open_by_key(GOOGLE_SHEET_ID).worksheet(sheet_name)
+    try:
+        # Get the spreadsheet
+        spreadsheet = gc.open_by_key(GOOGLE_SHEET_ID)
+        
+        # Try to get the worksheet
+        worksheet = spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        # Print all available worksheet names for debugging
+        available_sheets = [ws.title for ws in spreadsheet.worksheets()]
+        print(f"Worksheet '{sheet_name}' not found. Available worksheets: {available_sheets}")
+        raise
+    except Exception as e:
+        print(f"Error accessing Google Sheet: {str(e)}")
+        raise
     if df.empty:
-        print(f"Skip: {sheet_name} DataFrame is empty, not pasting.")
+        print(f"Empty DataFrame for {sheet_name}, pasting message.")
+        worksheet.batch_clear(["A:M"])
+        worksheet.update(range_name="A1", values=[["There is no data for this period from date to current date"]])
+        # Update timestamp
+        local_tz = pytz.timezone("Asia/Dhaka")
+        current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
+        worksheet.update(range_name="B1", values=[[f"Last Updated: {current_timestamp}"]])
         return
 
     # Helper function to convert column number to letter (1=A, 27=AA, etc.)
@@ -187,9 +206,9 @@ def paste_to_gsheet(df, sheet_name):
             n //= 26
         return result
     
-    # Clear entire sheet before writing new data
-    worksheet.clear()
-    print(f"Cleared entire sheet: {sheet_name}")
+    # Clear only range A:I instead of entire sheet
+    worksheet.batch_clear(["A:M"])
+    print(f"Cleared range A:M from sheet: {sheet_name}")
     
     # Write header
     header = df.columns.tolist()
@@ -228,20 +247,29 @@ def paste_to_gsheet(df, sheet_name):
 if __name__ == "__main__":
     uid = odoo_login()
     
-    # Manufacturing Order data - Company ID
-    company_id = 1
-    sheet_name = "Pending Orders"
+    # Define company to sheet name mapping
+    companies = [
+        {"id": 1, "sheet_name": "Pending_Orders_zip"},
+        {"id": 3, "sheet_name": "Pending_Orders_MT"}
+    ]
 
-    # Fetch Manufacturing Order data
-    print("\n========== Fetching Manufacturing Order Data ==========")
-    records = fetch_manufacturing_order_data(uid, company_id)
+    for company in companies:
+        company_id = company["id"]
+        sheet_name = company["sheet_name"]
+        
+        print(f"\n========== Fetching Manufacturing Order Data for Company {company_id} ==========")
+        
+        # Fetch Manufacturing Order data
+        records = fetch_manufacturing_order_data(uid, company_id)
+        
+        # Flatten records
+        flat_records = []
+        for r in records:
+            flat_records.append(flatten_manufacturing_order_record(r))
+        
+        df = pd.DataFrame(flat_records)
+        paste_to_gsheet(df, sheet_name)
+        
+        print(f"Data fetched and uploaded successfully to '{sheet_name}' sheet!")
     
-    # Flatten records
-    flat_records = []
-    for r in records:
-        flat_records.append(flatten_manufacturing_order_record(r))
-    
-    df = pd.DataFrame(flat_records)
-    paste_to_gsheet(df, sheet_name)
-    
-    print(f"\nAll Manufacturing Order data fetched and uploaded successfully to '{sheet_name}' sheet!")
+    print("\nAll companies' manufacturing order data processed successfully!")

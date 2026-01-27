@@ -200,7 +200,13 @@ def flatten_fg_delivery_record(rec):
 def paste_to_gsheet(df, sheet_name):
     worksheet = gc.open_by_key(GOOGLE_SHEET_ID).worksheet(sheet_name)
     if df.empty:
-        print(f"Skip: {sheet_name} DataFrame is empty, not pasting.")
+        print(f"Empty DataFrame for {sheet_name}, pasting message.")
+        worksheet.batch_clear(["A:I"])
+        worksheet.update(range_name="A1", values=[["There is no data for this period from date to current date"]])
+        # Update timestamp
+        local_tz = pytz.timezone("Asia/Dhaka")
+        current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
+        worksheet.update(range_name="B1", values=[[f"Last Updated: {current_timestamp}"]])
         return
 
     # Helper function to convert column number to letter (1=A, 27=AA, etc.)
@@ -212,9 +218,9 @@ def paste_to_gsheet(df, sheet_name):
             n //= 26
         return result
     
-    # Clear entire sheet before writing new data
-    worksheet.clear()
-    print(f"Cleared entire sheet: {sheet_name}")
+    # Clear only range A:I instead of entire sheet
+    worksheet.batch_clear(["A:I"])
+    print(f"Cleared range A:I from sheet: {sheet_name}")
     
     # Write header
     header = df.columns.tolist()
@@ -253,20 +259,29 @@ def paste_to_gsheet(df, sheet_name):
 if __name__ == "__main__":
     uid = odoo_login()
     
-    # FG Delivery data - Company ID
-    company_id = 1
-    sheet_name = "Dispatch"
+    # Define company to sheet name mapping
+    companies = [
+        {"id": 1, "sheet_name": "Dispatch_zip"},
+        {"id": 3, "sheet_name": "Dispatch_MT"}
+    ]
 
-    # Fetch FG Delivery data
-    print("\n========== Fetching FG Delivery Data ==========")
-    records = fetch_fg_delivery_data(uid, company_id)
+    for company in companies:
+        company_id = company["id"]
+        sheet_name = company["sheet_name"]
+        
+        print(f"\n========== Fetching FG Delivery Data for Company {company_id} ==========")
+        
+        # Fetch FG Delivery data
+        records = fetch_fg_delivery_data(uid, company_id)
+        
+        # Flatten records
+        flat_records = []
+        for r in records:
+            flat_records.append(flatten_fg_delivery_record(r))
+        
+        df = pd.DataFrame(flat_records)
+        paste_to_gsheet(df, sheet_name)
+        
+        print(f"Data fetched and uploaded successfully to '{sheet_name}' sheet!")
     
-    # Flatten records
-    flat_records = []
-    for r in records:
-        flat_records.append(flatten_fg_delivery_record(r))
-    
-    df = pd.DataFrame(flat_records)
-    paste_to_gsheet(df, sheet_name)
-    
-    print(f"\nAll FG Delivery data fetched and uploaded successfully to '{sheet_name}' sheet!")
+    print("\nAll companies' FG Delivery data processed successfully!")

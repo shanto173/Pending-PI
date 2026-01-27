@@ -193,7 +193,13 @@ def flatten_carters_journey_record(rec):
 def paste_to_gsheet(df, sheet_name):
     worksheet = gc.open_by_key(GOOGLE_SHEET_ID).worksheet(sheet_name)
     if df.empty:
-        print(f"Skip: {sheet_name} DataFrame is empty, not pasting.")
+        print(f"Empty DataFrame for {sheet_name}, pasting message.")
+        worksheet.batch_clear(["A:I"])
+        worksheet.update(range_name="A1", values=[["There is no data for this period from date to current date"]])
+        # Update timestamp
+        local_tz = pytz.timezone("Asia/Dhaka")
+        current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
+        worksheet.update(range_name="J1", values=[[f"Last Updated: {current_timestamp}"]])
         return
 
     # Helper function to convert column number to letter (1=A, 27=AA, etc.)
@@ -248,10 +254,14 @@ if __name__ == "__main__":
     
     # Carter's Journey data - Company ID and Sales Types mapping to Sheet Tab names
     carters_journey_map = [
-        (1, ["oa"], "OA"),
-        (1, ["sample"], "SA"),
-        (1, ["bo"], "BO"),
-        (1, ["sale"], "PI")
+        (1, ["oa"], "OA_zip"),
+        (1, ["sample"], "SA_zip"),
+        (1, ["bo"], "BO_zip"),
+        (1, ["sale"], "PI_zip"),
+        (3, ["oa"], "OA_MT"),
+        (3, ["sample"], "SA_MT"),
+        (3, ["bo"], "BO_MT"),
+        (3, ["sale"], "PI_MT")
     ]
 
     # Fetch Carter's Journey data
