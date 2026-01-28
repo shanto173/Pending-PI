@@ -73,8 +73,6 @@ def fetch_manufacturing_order_data(uid, company_id, batch_size=1000):
         "product_uom_qty": {},
         "done_qty": {},
         "balance_qty": {},
-        "oa_total_balance": {},
-        "state": {},
         "final_price": {}
     }
 
@@ -153,10 +151,14 @@ def get_string_value(field, subfield=None):
     return str(field)
 
 # --------- Flatten Manufacturing Order Record ---------
-def flatten_manufacturing_order_record(rec):
+def flatten_manufacturing_order_record(rec, company_name):
     """Flatten manufacturing.order record into a single row"""
+    # Extract date_order and remove timestamp (keep only date part)
+    date_order_raw = rec.get("date_order", "")
+    date_order = date_order_raw.split()[0] if date_order_raw else ""
+
     return {
-        "Order Date": rec.get("date_order", ""),
+        "Order Date": date_order,
         "OA": safe_get(rec.get("oa_id"), "display_name"),
         "Buyer Name/Brand Group": get_string_value(rec.get("buyer_id"), "brand"),
         "Customer": safe_get(rec.get("partner_id"), "display_name"),
@@ -167,8 +169,7 @@ def flatten_manufacturing_order_record(rec):
         "Done Qty": rec.get("done_qty", ""),
         "Balance": rec.get("balance_qty", ""),
         "Final Price": rec.get("final_price", ""),
-        "OA Total Balance": rec.get("oa_total_balance", ""),
-        "State": rec.get("state", "")
+        "Company": company_name
     }
 
 # --------- Upload to Google Sheet ---------
@@ -190,11 +191,11 @@ def paste_to_gsheet(df, sheet_name):
     if df.empty:
         print(f"Empty DataFrame for {sheet_name}, pasting message.")
         worksheet.batch_clear(["A:M"])
-        worksheet.update(range_name="A1", values=[["There is no data for this period from date to current date"]])
+        worksheet.update(range_name="A2", values=[["There is no data for this period from date to current date"]])
         # Update timestamp
         local_tz = pytz.timezone("Asia/Dhaka")
         current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
-        worksheet.update(range_name="B1", values=[[f"Last Updated: {current_timestamp}"]])
+        worksheet.update(range_name="B2", values=[[f"Last Updated: {current_timestamp}"]])
         return
 
     # Helper function to convert column number to letter (1=A, 27=AA, etc.)
@@ -210,66 +211,69 @@ def paste_to_gsheet(df, sheet_name):
     worksheet.batch_clear(["A:M"])
     print(f"Cleared range A:M from sheet: {sheet_name}")
     
-    # Write header
-    header = df.columns.tolist()
-    end_col_letter = col_num_to_letter(len(header))
-    worksheet.update(range_name=f"A1:{end_col_letter}1", values=[header])
-    
     # Prepare data for writing (convert DataFrame to list of lists)
     values_to_write = df.values.tolist()
-    
+
     if values_to_write:
         # Calculate required rows
-        required_rows = 1 + len(values_to_write)  # Header + data rows
+        required_rows = 2 + len(values_to_write)  # Header row 2 + data rows starting from row 3
         current_row_count = worksheet.row_count
-        
+
         # Expand sheet if necessary
         if required_rows > current_row_count:
             rows_to_add = required_rows - current_row_count
             worksheet.add_rows(rows_to_add)
             print(f"Added {rows_to_add} rows to sheet. New total: {required_rows}")
-        
+
         # Calculate the end column letter
         end_col = col_num_to_letter(len(df.columns))
-        
-        # Write data starting from row 2
-        range_to_update = f"A2:{end_col}{1 + len(values_to_write)}"
+
+        # Write header to row 2 (A2)
+        header = df.columns.tolist()
+        worksheet.update(range_name=f"A2:{end_col}2", values=[header])
+
+        # Write data starting from row 3 (A3)
+        range_to_update = f"A3:{end_col}{2 + len(values_to_write)}"
         worksheet.update(range_name=range_to_update, values=values_to_write)
-        
-        # Update timestamp
+
+        # Update timestamp (move one column to the right due to Company column, and to row 2)
         local_tz = pytz.timezone("Asia/Dhaka")
         current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
-        worksheet.update(range_name=f"{col_num_to_letter(len(header) + 1)}1", values=[[f"Last Updated: {current_timestamp}"]])
+        worksheet.update(range_name=f"{col_num_to_letter(len(df.columns) + 2)}2", values=[[f"Last Updated: {current_timestamp}"]])
         
         print(f"Data pasted to Google Sheet ({sheet_name}) with {len(values_to_write)} rows.")
 
 # --------- Main ---------
 if __name__ == "__main__":
     uid = odoo_login()
-    
-    # Define company to sheet name mapping
+
+    # Define company mapping with company names
     companies = [
-        {"id": 1, "sheet_name": "Pending_Orders_zip"},
-        {"id": 3, "sheet_name": "Pending_Orders_MT"}
+        {"id": 1, "name": "Zipper"},
+        {"id": 3, "name": "Metal Trims"}
     ]
+
+    all_flat_records = []
 
     for company in companies:
         company_id = company["id"]
-        sheet_name = company["sheet_name"]
-        
-        print(f"\n========== Fetching Manufacturing Order Data for Company {company_id} ==========")
-        
+        company_name = company["name"]
+
+        print(f"\n========== Fetching Manufacturing Order Data for Company {company_id} ({company_name}) ==========")
+
         # Fetch Manufacturing Order data
         records = fetch_manufacturing_order_data(uid, company_id)
-        
-        # Flatten records
-        flat_records = []
+
+        # Flatten records with company name
         for r in records:
-            flat_records.append(flatten_manufacturing_order_record(r))
-        
-        df = pd.DataFrame(flat_records)
-        paste_to_gsheet(df, sheet_name)
-        
-        print(f"Data fetched and uploaded successfully to '{sheet_name}' sheet!")
-    
-    print("\nAll companies' manufacturing order data processed successfully!")
+            all_flat_records.append(flatten_manufacturing_order_record(r, company_name))
+
+        print(f"Data fetched successfully for Company {company_id} ({company_name})!")
+
+    # Create DataFrame from all records
+    df = pd.DataFrame(all_flat_records)
+
+    # Paste to single sheet 'Pending_Orders'
+    paste_to_gsheet(df, "Pending_Orders")
+
+    print("\nAll companies' manufacturing order data processed successfully to 'Pending_Orders' sheet!")

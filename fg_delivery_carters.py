@@ -50,22 +50,23 @@ def odoo_login():
 def fetch_fg_delivery_data(uid, company_id, batch_size=200):
     all_records, offset = [], 0
     
-    # Get current month's 1st day and current date for the domain filter
+    # Get date range: from 2025-04-01 to current date for the domain filter
     local_tz = pytz.timezone("Asia/Dhaka")
     now = datetime.now(local_tz)
     current_date = now.strftime("%Y-%m-%d %H:%M:%S")
-    first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+    # Fixed start date: April 1, 2025
+    start_date = "2025-04-01 00:00:00"
     
     # Domain filters:
     # - next_operation = Delivery
     # - state not done/closed
     # - buyer_id.brand in [183784, 180989]
-    # - date range (current month)
+    # - date range (from 2025-04-01 to current date)
     domain = [
         ["next_operation", "=", "Delivery"],
         ["state", "not in", ["done", "closed"]],
         ["buyer_id.brand", "in", [183784, 180989]],
-        ["action_date", ">=", first_day_of_month],
+        ["action_date", ">=", start_date],
         ["action_date", "<=", current_date]
     ]
     
@@ -97,7 +98,8 @@ def fetch_fg_delivery_data(uid, company_id, batch_size=200):
     
     specification = {
         "action_date": {},
-        "oa_id": {},
+        "date_order": {},
+        "oa_id": {"fields": {"display_name": {}}},
         "buyer_id": {"fields": {"brand": {"fields": {"display_name": {}}}}},
         "partner_id": {"fields": {"display_name": {}}},
         "fg_categ_type": {},
@@ -183,17 +185,27 @@ def get_string_value(field, subfield=None):
     return str(field)
 
 # --------- Flatten FG Delivery Record ---------
-def flatten_fg_delivery_record(rec):
+def flatten_fg_delivery_record(rec, company_name):
     """Flatten operation.details record into a single row"""
+    # Extract action_date and remove timestamp (keep only date part)
+    action_date_raw = rec.get("action_date", "")
+    action_date = action_date_raw.split()[0] if action_date_raw else ""
+
+    # Extract date_order and remove timestamp (keep only date part)
+    date_order_raw = rec.get("date_order", "")
+    date_order = date_order_raw.split()[0] if date_order_raw else ""
+
     return {
-        "Action Date": rec.get("action_date", ""),
-        "OA": rec.get("oa_id", ""),
+        "Action Date": action_date,
+        "Order Date": date_order,
+        "OA": safe_get(rec.get("oa_id"), "display_name"),
         "Buyer ID/Brand Group": get_string_value(rec.get("buyer_id"), "brand"),
         "Customer": safe_get(rec.get("partner_id"), "display_name"),
         "Item": rec.get("fg_categ_type", ""),
         "Slider Code": rec.get("slidercodesfg", ""),
         "Final Price": rec.get("final_price", ""),
-        "Qty": rec.get("qty", "")
+        "Qty": rec.get("qty", ""),
+        "Company": company_name
     }
 
 # --------- Upload to Google Sheet ---------
@@ -248,40 +260,55 @@ def paste_to_gsheet(df, sheet_name):
         range_to_update = f"A2:{end_col}{1 + len(values_to_write)}"
         worksheet.update(range_name=range_to_update, values=values_to_write)
         
-        # Update timestamp
+        # Update timestamp (move one column to the right due to Company column)
         local_tz = pytz.timezone("Asia/Dhaka")
         current_timestamp = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
-        worksheet.update(range_name=f"{col_num_to_letter(len(header) + 1)}1", values=[[f"Last Updated: {current_timestamp}"]])
+        worksheet.update(range_name=f"{col_num_to_letter(len(header) + 2)}1", values=[[f"Last Updated: {current_timestamp}"]])
         
         print(f"Data pasted to Google Sheet ({sheet_name}) with {len(values_to_write)} rows.")
 
 # --------- Main ---------
 if __name__ == "__main__":
     uid = odoo_login()
-    
-    # Define company to sheet name mapping
+
+    # Define company mapping with company names
     companies = [
-        {"id": 1, "sheet_name": "Dispatch_zip"},
-        {"id": 3, "sheet_name": "Dispatch_MT"}
+        {"id": 1, "name": "Zipper"},
+        {"id": 3, "name": "Metal Trims"}
     ]
+
+    all_flat_records = []
 
     for company in companies:
         company_id = company["id"]
-        sheet_name = company["sheet_name"]
-        
-        print(f"\n========== Fetching FG Delivery Data for Company {company_id} ==========")
-        
+        company_name = company["name"]
+
+        print(f"\n========== Fetching FG Delivery Data for Company {company_id} ({company_name}) ==========")
+
         # Fetch FG Delivery data
         records = fetch_fg_delivery_data(uid, company_id)
-        
-        # Flatten records
-        flat_records = []
+
+        # Flatten records with company name
         for r in records:
-            flat_records.append(flatten_fg_delivery_record(r))
-        
-        df = pd.DataFrame(flat_records)
-        paste_to_gsheet(df, sheet_name)
-        
-        print(f"Data fetched and uploaded successfully to '{sheet_name}' sheet!")
-    
-    print("\nAll companies' FG Delivery data processed successfully!")
+            all_flat_records.append(flatten_fg_delivery_record(r, company_name))
+
+        print(f"Data fetched successfully for Company {company_id} ({company_name})!")
+
+    # Create DataFrame from all records
+    df = pd.DataFrame(all_flat_records)
+
+    # Group by all columns except Qty and sum the Qty
+    if not df.empty:
+        # Define aggregation: sum Qty, keep first for other columns
+        agg_dict = {col: 'first' for col in df.columns if col not in ['Qty', 'Action Date']}
+        agg_dict['Qty'] = 'sum'
+        # Group by Action Date and other identifying columns
+        group_cols = [col for col in df.columns if col not in ['Qty']]
+        df = df.groupby(group_cols, as_index=False).agg(agg_dict)
+        # Reorder columns to match original order
+        df = df[list(all_flat_records[0].keys())]
+
+    # Paste to single sheet 'Dispatch'
+    paste_to_gsheet(df, "Dispatch")
+
+    print("\nAll companies' FG Delivery data processed successfully to 'Dispatch' sheet!")
